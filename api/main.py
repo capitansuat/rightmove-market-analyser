@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from datetime import datetime, timezone
 from typing import Optional
@@ -188,6 +189,115 @@ def market(
         listings=sorted(unique, key=lambda x: (x["dom"] or 0)),
         fetched_at=today.isoformat(),
     )
+
+
+# ---------------------------------------------------------------------------
+# Sold prices (Rightmove house-prices turbo-stream)
+# ---------------------------------------------------------------------------
+
+def _parse_turbo_stream(raw_text: str) -> list:
+    match = re.search(r'streamController\.enqueue\("(.+?)"\)', raw_text, re.DOTALL)
+    if not match:
+        return []
+    raw = match.group(1).encode().decode("unicode_escape")
+    return json.loads(raw)
+
+
+def _extract_sold(parsed: list) -> list[dict]:
+    props_list = None
+    for i, item in enumerate(parsed):
+        if item == "properties" and i + 1 < len(parsed) and isinstance(parsed[i + 1], list):
+            props_list = parsed[i + 1]
+            break
+    if not props_list:
+        return []
+
+    def resolve_dict(d: dict) -> dict:
+        """Resolve a turbo-stream dict: _N keys map to key name at parsed[N], value at parsed[V]."""
+        result = {}
+        for k, v in d.items():
+            if not k.startswith("_") or not k[1:].isdigit():
+                continue
+            idx = int(k[1:])
+            key_name = parsed[idx] if idx < len(parsed) else k
+            if isinstance(v, int) and 0 <= v < len(parsed):
+                result[key_name] = parsed[v]
+            else:
+                result[key_name] = v
+        return result
+
+    results = []
+    for pi in props_list:
+        if not isinstance(pi, int) or pi >= len(parsed):
+            continue
+        d = parsed[pi]
+        if not isinstance(d, dict):
+            continue
+
+        prop = resolve_dict(d)
+        address = prop.get("address", "")
+        prop_type = prop.get("propertyType", "")
+        bedrooms = prop.get("bedrooms")
+
+        lt_raw = prop.get("latestTransaction")
+        if not isinstance(lt_raw, dict):
+            continue
+        lt = resolve_dict(lt_raw)
+
+        price = str(lt.get("displayPrice", "")).replace("\u00a3", "£").replace("Â£", "£")
+        date_sold = str(lt.get("dateSold", ""))
+
+        if not date_sold or not address:
+            continue
+
+        results.append({
+            "address": str(address),
+            "date_sold": date_sold,
+            "price": price,
+            "type": str(prop_type),
+            "bedrooms": bedrooms if isinstance(bedrooms, int) else None,
+        })
+    return results
+
+
+@app.get("/api/sold")
+def sold(
+    postcode: str = Query(..., description="UK postcode e.g. DE6 1DQ"),
+):
+    slug = postcode.strip().upper().replace(" ", "-").lower()
+    url = f"https://www.rightmove.co.uk/house-prices/{slug}.html"
+
+    try:
+        r = requests.get(url, headers=DEFAULT_HEADERS, timeout=15)
+        r.raise_for_status()
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Rightmove fetch failed: {e}")
+
+    parsed = _parse_turbo_stream(r.text)
+    if not parsed:
+        raise HTTPException(status_code=404, detail="No sold data found")
+
+    sales = _extract_sold(parsed)
+
+    # Monthly summary
+    from collections import Counter as C
+    monthly: dict[str, int] = {}
+    for s in sales:
+        try:
+            from datetime import datetime as DT
+            dt = DT.strptime(s["date_sold"], "%d %b %Y")
+            key = dt.strftime("%Y-%m")
+            monthly[key] = monthly.get(key, 0) + 1
+        except ValueError:
+            pass
+
+    return {
+        "postcode": postcode.upper(),
+        "total_sold": len(sales),
+        "sales": sales,
+        "monthly": dict(sorted(monthly.items())),
+        "url": url,
+    }
 
 
 # Serve frontend
