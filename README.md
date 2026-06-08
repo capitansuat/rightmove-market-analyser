@@ -4,11 +4,25 @@ A local web tool for UK estate agents to analyse property market activity from R
 
 ## What it does
 
-- Fetches all listings (active + STC) from Rightmove for a given postcode and radius
-- Shows key market stats: total listings, STC rate, median days on market
+- Fetches all active and STC listings from Rightmove for a given postcode and radius
+- Shows completed sales from Rightmove house-prices pages
+- Pulls official sold data from HM Land Registry (SPARQL)
+- Displays UK House Price Index trends by region (average price, annual change, sales volume)
+- Looks up Energy Performance Certificates (EPC rating, floor area, heating, walls, roof)
+- Key market stats: total listings, STC rate, median days on market
 - Full sortable/filterable table with DOM bar charts
 - Links directly to each Rightmove listing
-- No Rightmove account or API key needed
+- No Rightmove account needed (EPC requires free API key)
+
+## API Endpoints
+
+| Endpoint | Source | Data |
+|---|---|---|
+| `/api/market` | Rightmove | Active + STC listings, DOM, price |
+| `/api/sold` | Rightmove | Completed sales (house-prices) |
+| `/api/land-registry` | HM Land Registry | PPD sales, monthly volume by type |
+| `/api/hpi` | HM Land Registry | Price index, annual change, sales volume |
+| `/api/epc` | EPC Register | Energy rating, floor area, construction |
 
 ## Requirements
 
@@ -18,7 +32,7 @@ A local web tool for UK estate agents to analyse property market activity from R
 ## Installation
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/rightmove-market-analyser.git
+git clone https://github.com/capitansuat/rightmove-market-analyser.git
 cd rightmove-market-analyser
 pip install -r requirements.txt
 ```
@@ -26,7 +40,7 @@ pip install -r requirements.txt
 Or with uv:
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/rightmove-market-analyser.git
+git clone https://github.com/capitansuat/rightmove-market-analyser.git
 cd rightmove-market-analyser
 uv pip install -r requirements.txt
 ```
@@ -41,6 +55,15 @@ Then open your browser at:
 
 ```
 http://localhost:8000
+```
+
+### EPC Setup (optional)
+
+To use the `/api/epc` endpoint, register for a free API key at https://epc.opendatacommunities.org/ and set environment variables:
+
+```bash
+export EPC_API_EMAIL=your@email.com
+export EPC_API_KEY=your-api-key
 ```
 
 Enter a postcode (e.g. `SW1A 2AA`), set radius and max price, click **Analyse**.
