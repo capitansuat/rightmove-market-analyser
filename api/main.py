@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import time
 from datetime import datetime, timezone
@@ -436,6 +437,79 @@ def hpi(
         "region_slug": region,
         "months": len(data_points),
         "data": data_points,
+    }
+
+
+# ---------------------------------------------------------------------------
+# EPC — Energy Performance Certificates (free API, key required)
+# Register at https://epc.opendatacommunities.org/ to get a free key.
+# Set EPC_API_EMAIL and EPC_API_KEY environment variables.
+# ---------------------------------------------------------------------------
+
+import base64 as _b64
+
+EPC_BASE = "https://epc.opendatacommunities.org/api/v1"
+
+
+def _epc_headers() -> dict:
+    email = os.getenv("EPC_API_EMAIL", "")
+    key = os.getenv("EPC_API_KEY", "")
+    if not email or not key:
+        raise HTTPException(
+            status_code=503,
+            detail="EPC API not configured. Set EPC_API_EMAIL and EPC_API_KEY env vars. Register free at https://epc.opendatacommunities.org/",
+        )
+    token = _b64.b64encode(f"{email}:{key}".encode()).decode()
+    return {
+        "Authorization": f"Basic {token}",
+        "Accept": "application/json",
+    }
+
+
+@app.get("/api/epc")
+def epc(
+    postcode: str = Query(..., description="UK postcode"),
+):
+    headers = _epc_headers()
+    params = {"postcode": postcode.upper().strip(), "size": 100}
+
+    try:
+        r = requests.get(f"{EPC_BASE}/domestic/search", headers=headers, params=params, timeout=15)
+        r.raise_for_status()
+    except requests.HTTPError as e:
+        raise HTTPException(status_code=r.status_code, detail=f"EPC API error: {e}")
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"EPC API failed: {e}")
+
+    data = r.json()
+    rows = data.get("rows", [])
+
+    certs = []
+    for row in rows:
+        certs.append({
+            "address": row.get("address", ""),
+            "postcode": row.get("postcode", ""),
+            "rating": row.get("current-energy-rating", ""),
+            "score": row.get("current-energy-efficiency", ""),
+            "potential_rating": row.get("potential-energy-rating", ""),
+            "potential_score": row.get("potential-energy-efficiency", ""),
+            "property_type": row.get("property-type", ""),
+            "built_form": row.get("built-form", ""),
+            "floor_area": row.get("total-floor-area", ""),
+            "inspection_date": row.get("inspection-date", ""),
+            "heating": row.get("mainheat-description", ""),
+            "hot_water": row.get("hotwater-description", ""),
+            "walls": row.get("walls-description", ""),
+            "roof": row.get("roof-description", ""),
+            "windows": row.get("windows-description", ""),
+            "floor_level": row.get("floor-level", ""),
+            "co2_emissions": row.get("co2-emissions-current", ""),
+        })
+
+    return {
+        "postcode": postcode.upper(),
+        "total": len(certs),
+        "certificates": certs,
     }
 
 
