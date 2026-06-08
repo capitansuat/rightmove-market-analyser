@@ -300,6 +300,145 @@ def sold(
     }
 
 
+# ---------------------------------------------------------------------------
+# HM Land Registry — PPD (completed sales via SPARQL)
+# ---------------------------------------------------------------------------
+
+SPARQL_ENDPOINT = "https://landregistry.data.gov.uk/landregistry/query"
+
+
+@app.get("/api/land-registry")
+def land_registry(
+    town: str = Query(..., description="Town name, e.g. ASHBOURNE"),
+    postcode_prefix: str = Query("DE6", description="Postcode prefix filter"),
+    months: int = Query(12, description="Months of history"),
+):
+    from datetime import timedelta
+
+    cutoff = (datetime.now(tz=timezone.utc) - timedelta(days=months * 31)).strftime("%Y-%m-%d")
+
+    query = f"""
+    PREFIX lrppi: <http://landregistry.data.gov.uk/def/ppi/>
+    PREFIX lrcommon: <http://landregistry.data.gov.uk/def/common/>
+
+    SELECT ?date ?price ?paon ?street ?postcode ?type
+    WHERE {{
+      ?txn lrppi:transactionDate ?date ;
+           lrppi:pricePaid ?price ;
+           lrppi:propertyAddress ?addr ;
+           lrppi:propertyType ?typeUri .
+      ?addr lrcommon:postcode ?postcode ;
+            lrcommon:town "{town.upper()}"^^<http://www.w3.org/2001/XMLSchema#string> .
+      OPTIONAL {{ ?addr lrcommon:paon ?paon }}
+      OPTIONAL {{ ?addr lrcommon:street ?street }}
+      ?typeUri <http://www.w3.org/2000/01/rdf-schema#label> ?type .
+      FILTER(STRSTARTS(?postcode, "{postcode_prefix.upper()}"))
+      FILTER(?date >= "{cutoff}"^^<http://www.w3.org/2001/XMLSchema#date>)
+    }}
+    ORDER BY DESC(?date)
+    LIMIT 1000
+    """
+
+    try:
+        r = requests.get(SPARQL_ENDPOINT, params={"query": query, "output": "json"}, timeout=60)
+        r.raise_for_status()
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Land Registry query failed: {e}")
+
+    results = r.json().get("results", {}).get("bindings", [])
+
+    sales = []
+    monthly: dict[str, dict] = {}
+    for row in results:
+        date = row.get("date", {}).get("value", "")[:10]
+        price = int(float(row.get("price", {}).get("value", 0)))
+        paon = row.get("paon", {}).get("value", "")
+        street = row.get("street", {}).get("value", "")
+        postcode = row.get("postcode", {}).get("value", "")
+        ptype = row.get("type", {}).get("value", "")
+
+        sales.append({
+            "date": date,
+            "price": price,
+            "address": f"{paon} {street}".strip(),
+            "postcode": postcode,
+            "type": ptype,
+        })
+
+        month_key = date[:7]
+        if month_key not in monthly:
+            monthly[month_key] = {"total": 0, "Terraced": 0, "Semi-detached": 0, "Detached": 0, "Flat/Maisonette": 0}
+        monthly[month_key]["total"] += 1
+        if ptype in monthly[month_key]:
+            monthly[month_key][ptype] += 1
+
+    return {
+        "town": town.upper(),
+        "postcode_prefix": postcode_prefix.upper(),
+        "total_sales": len(sales),
+        "sales": sales,
+        "monthly": dict(sorted(monthly.items())),
+    }
+
+
+# ---------------------------------------------------------------------------
+# UK House Price Index (UKHPI via SPARQL)
+# ---------------------------------------------------------------------------
+
+@app.get("/api/hpi")
+def hpi(
+    region: str = Query("derbyshire-dales", description="Region slug, e.g. derbyshire-dales, east-midlands"),
+    months: int = Query(24, description="Months of history"),
+):
+    query = f"""
+    PREFIX ukhpi: <http://landregistry.data.gov.uk/def/ukhpi/>
+    PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+
+    SELECT ?date ?avgPrice ?hpi ?annualChange ?salesVolume ?regionLabel
+    WHERE {{
+      ?obs ukhpi:refRegion <http://landregistry.data.gov.uk/id/region/{region}> ;
+           ukhpi:refMonth ?date ;
+           ukhpi:averagePrice ?avgPrice .
+      OPTIONAL {{ ?obs ukhpi:housePriceIndex ?hpi }}
+      OPTIONAL {{ ?obs ukhpi:percentageChange ?annualChange }}
+      OPTIONAL {{ ?obs ukhpi:salesVolume ?salesVolume }}
+      <http://landregistry.data.gov.uk/id/region/{region}> rdfs:label ?regionLabel .
+      FILTER(LANG(?regionLabel) = "" || LANG(?regionLabel) = "en")
+    }}
+    ORDER BY DESC(?date)
+    LIMIT {months}
+    """
+
+    try:
+        r = requests.get(SPARQL_ENDPOINT, params={"query": query, "output": "json"}, timeout=60)
+        r.raise_for_status()
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"UKHPI query failed: {e}")
+
+    results = r.json().get("results", {}).get("bindings", [])
+    if not results:
+        raise HTTPException(status_code=404, detail=f"No HPI data for region '{region}'")
+
+    region_label = results[0].get("regionLabel", {}).get("value", region)
+
+    data_points = []
+    for row in sorted(results, key=lambda x: x["date"]["value"]):
+        data_points.append({
+            "date": row["date"]["value"],
+            "average_price": round(float(row["avgPrice"]["value"])),
+            "hpi": round(float(row["hpi"]["value"]), 1) if "hpi" in row else None,
+            "annual_change_pct": round(float(row["annualChange"]["value"]), 1) if "annualChange" in row else None,
+            "sales_volume": int(row["salesVolume"]["value"]) if "salesVolume" in row else None,
+        })
+
+    return {
+        "region": region_label,
+        "region_slug": region,
+        "months": len(data_points),
+        "data": data_points,
+    }
+
+
 # Serve frontend
 frontend_path = Path(__file__).parent.parent / "frontend"
 if frontend_path.exists():
