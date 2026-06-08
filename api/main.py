@@ -513,6 +513,84 @@ def epc(
     }
 
 
+# ---------------------------------------------------------------------------
+# Flood Risk — Environment Agency APIs (free, no key)
+# ---------------------------------------------------------------------------
+
+EA_BASE = "https://environment.data.gov.uk/flood-monitoring"
+
+
+@app.get("/api/flood")
+def flood(
+    lat: float = Query(..., description="Latitude"),
+    lng: float = Query(..., description="Longitude"),
+    dist: int = Query(3, description="Search radius in km"),
+):
+    results: dict = {"lat": lat, "lng": lng, "dist_km": dist}
+
+    # 1. Monitoring stations nearby
+    try:
+        r = requests.get(
+            f"{EA_BASE}/id/stations",
+            params={"lat": lat, "long": lng, "dist": dist},
+            timeout=15,
+        )
+        r.raise_for_status()
+        stations = []
+        for s in r.json().get("items", []):
+            stations.append({
+                "name": s.get("label", ""),
+                "river": s.get("riverName", ""),
+                "reference": s.get("stationReference", ""),
+                "type": s.get("type", ""),
+            })
+        results["stations"] = stations
+    except Exception:
+        results["stations"] = []
+
+    # 2. Active flood warnings
+    try:
+        r2 = requests.get(
+            f"{EA_BASE}/id/floods",
+            params={"lat": lat, "long": lng, "dist": dist * 2},
+            timeout=15,
+        )
+        r2.raise_for_status()
+        warnings = []
+        for f in r2.json().get("items", []):
+            warnings.append({
+                "description": f.get("description", ""),
+                "severity": f.get("severityLevel", ""),
+                "message": f.get("message", ""),
+                "time_raised": f.get("timeRaised", ""),
+            })
+        results["warnings"] = warnings
+    except Exception:
+        results["warnings"] = []
+
+    # 3. Flood areas
+    try:
+        r3 = requests.get(
+            f"{EA_BASE}/id/floodAreas",
+            params={"lat": lat, "long": lng, "dist": dist},
+            timeout=15,
+        )
+        r3.raise_for_status()
+        areas = []
+        for a in r3.json().get("items", []):
+            areas.append({
+                "name": a.get("label", ""),
+                "county": a.get("county", ""),
+                "river_or_sea": a.get("riverOrSea", ""),
+                "area_id": a.get("fwdCode", ""),
+            })
+        results["flood_areas"] = areas
+    except Exception:
+        results["flood_areas"] = []
+
+    return results
+
+
 # Serve frontend
 frontend_path = Path(__file__).parent.parent / "frontend"
 if frontend_path.exists():
