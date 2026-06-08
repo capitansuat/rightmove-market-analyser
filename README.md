@@ -16,13 +16,15 @@ A local web tool for UK estate agents to analyse property market activity from R
 
 ## API Endpoints
 
-| Endpoint | Source | Data |
-|---|---|---|
-| `/api/market` | Rightmove | Active + STC listings, DOM, price |
-| `/api/sold` | Rightmove | Completed sales (house-prices) |
-| `/api/land-registry` | HM Land Registry | PPD sales, monthly volume by type |
-| `/api/hpi` | HM Land Registry | Price index, annual change, sales volume |
-| `/api/epc` | EPC Register | Energy rating, floor area, construction |
+| Endpoint | Source | Key | Data |
+|---|---|---|---|
+| `/api/market` | Rightmove | No | Active + STC listings, DOM, price |
+| `/api/sold` | Rightmove | No | Completed sales (house-prices) |
+| `/api/land-registry` | HM Land Registry | No | PPD sales, monthly volume by type |
+| `/api/hpi` | HM Land Registry | No | Price index, annual change, sales volume |
+| `/api/flood` | Environment Agency | No | Monitoring stations, warnings, flood areas |
+| `/api/crime` | Police UK | No | Crime counts by category near a point |
+| `/api/epc` | EPC Register | Free | Energy rating, floor area, construction |
 
 ## Requirements
 
