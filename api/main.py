@@ -514,6 +514,46 @@ def epc(
 
 
 # ---------------------------------------------------------------------------
+# Crime — Police UK API (free, no key)
+# ---------------------------------------------------------------------------
+
+POLICE_BASE = "https://data.police.uk/api"
+
+
+@app.get("/api/crime")
+def crime(
+    lat: float = Query(..., description="Latitude"),
+    lng: float = Query(..., description="Longitude"),
+    date: str = Query("", description="Month (YYYY-MM), empty = latest"),
+):
+    params: dict = {"lat": lat, "lng": lng}
+    if date:
+        params["date"] = date
+
+    try:
+        r = requests.get(f"{POLICE_BASE}/crimes-street/all-crime", params=params, timeout=15)
+        r.raise_for_status()
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Police API failed: {e}")
+
+    crimes = r.json()
+
+    # Aggregate by category
+    by_category: dict[str, int] = {}
+    for c in crimes:
+        cat = c.get("category", "unknown")
+        by_category[cat] = by_category.get(cat, 0) + 1
+
+    return {
+        "lat": lat,
+        "lng": lng,
+        "date": date or "latest",
+        "total": len(crimes),
+        "by_category": dict(sorted(by_category.items(), key=lambda x: -x[1])),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Flood Risk — Environment Agency APIs (free, no key)
 # ---------------------------------------------------------------------------
 
