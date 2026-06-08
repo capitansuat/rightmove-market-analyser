@@ -2,8 +2,6 @@
 
 A local web tool for UK estate agents to analyse property market activity from Rightmove — days on market, STC rates, price distribution — for any postcode and radius.
 
-![screenshot](docs/screenshot.png)
-
 ## What it does
 
 - Fetches all listings (active + STC) from Rightmove for a given postcode and radius
