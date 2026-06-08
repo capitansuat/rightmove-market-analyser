@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Rightmove Market Analyser</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Fraunces:ital,wght@0,300;0,600;1,300&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #f5f2ee;
+    --surface: #ffffff;
+    --border: #e0dbd3;
+    --text: #1a1a18;
+    --muted: #7a776f;
+    --accent: #1f5c3e;
+    --accent-light: #e8f2ed;
+    --stc: #b45309;
+    --stc-light: #fef3c7;
+    --danger: #991b1b;
+    --mono: 'DM Mono', monospace;
+    --serif: 'Fraunces', Georgia, serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: var(--mono);
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    padding: 2rem;
+  }
+
+  header {
+    max-width: 1100px;
+    margin: 0 auto 2.5rem;
+    display: flex;
+    align-items: baseline;
+    gap: 1rem;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 1.25rem;
+  }
+
+  header h1 {
+    font-family: var(--serif);
+    font-weight: 300;
+    font-size: 2rem;
+    letter-spacing: -0.02em;
+  }
+
+  header span {
+    font-size: 0.75rem;
+    color: var(--muted);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .container { max-width: 1100px; margin: 0 auto; }
+
+  /* Search form */
+  .search-bar {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1.5rem;
+    display: flex;
+    gap: 1rem;
+    align-items: flex-end;
+    flex-wrap: wrap;
+    margin-bottom: 2rem;
+  }
+
+  .field { display: flex; flex-direction: column; gap: 0.4rem; }
+
+  label {
+    font-size: 0.7rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  input, select {
+    font-family: var(--mono);
+    font-size: 0.9rem;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    background: var(--bg);
+    color: var(--text);
+    width: 100%;
+  }
+
+  input:focus, select:focus {
+    outline: 2px solid var(--accent);
+    outline-offset: -1px;
+  }
+
+  .field--postcode input { width: 140px; text-transform: uppercase; }
+  .field--radius select { width: 120px; }
+  .field--price input { width: 140px; }
+
+  button {
+    font-family: var(--mono);
+    font-size: 0.85rem;
+    letter-spacing: 0.05em;
+    padding: 0.55rem 1.5rem;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: opacity 0.15s;
+    white-space: nowrap;
+  }
+
+  button:hover { opacity: 0.85; }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  /* KPI cards */
+  .kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 1rem;
+    margin-bottom: 2rem;
+  }
+
+  .kpi {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1.25rem 1rem;
+  }
+
+  .kpi__label {
+    font-size: 0.65rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 0.5rem;
+  }
+
+  .kpi__value {
+    font-family: var(--serif);
+    font-size: 2rem;
+    font-weight: 600;
+    line-height: 1;
+  }
+
+  .kpi__sub {
+    font-size: 0.7rem;
+    color: var(--muted);
+    margin-top: 0.3rem;
+  }
+
+  .kpi--stc { border-left: 3px solid var(--stc); }
+  .kpi--active { border-left: 3px solid var(--accent); }
+
+  /* Table */
+  .table-wrap {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    overflow: hidden;
+  }
+
+  .table-header {
+    padding: 1rem 1.25rem;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    flex-wrap: wrap;
+  }
+
+  .table-header h2 {
+    font-family: var(--serif);
+    font-weight: 300;
+    font-size: 1.1rem;
+  }
+
+  .filters {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
+
+  .filter-btn {
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    padding: 0.3rem 0.75rem;
+    background: var(--bg);
+    color: var(--muted);
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    cursor: pointer;
+    transition: all 0.15s;
+    letter-spacing: 0.05em;
+  }
+
+  .filter-btn.active {
+    background: var(--text);
+    color: #fff;
+    border-color: var(--text);
+  }
+
+  table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+
+  th {
+    text-align: left;
+    padding: 0.6rem 1rem;
+    font-size: 0.65rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+  }
+
+  th:hover { color: var(--text); }
+
+  td {
+    padding: 0.55rem 1rem;
+    border-bottom: 1px solid var(--border);
+    vertical-align: middle;
+  }
+
+  tr:last-child td { border-bottom: none; }
+
+  tr:hover td { background: var(--bg); }
+
+  .badge {
+    display: inline-block;
+    font-size: 0.65rem;
+    padding: 0.15rem 0.5rem;
+    border-radius: 2px;
+    letter-spacing: 0.05em;
+    font-weight: 500;
+  }
+
+  .badge--stc { background: var(--stc-light); color: var(--stc); }
+  .badge--active { background: var(--accent-light); color: var(--accent); }
+
+  .dom-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .dom-bar__track {
+    flex: 1;
+    height: 3px;
+    background: var(--border);
+    border-radius: 2px;
+    max-width: 80px;
+  }
+
+  .dom-bar__fill {
+    height: 100%;
+    border-radius: 2px;
+    background: var(--accent);
+    transition: width 0.3s;
+  }
+
+  .dom-bar__fill--stc { background: var(--stc); }
+  .dom-bar__fill--long { background: var(--danger); }
+
+  a.prop-link { color: var(--accent); text-decoration: none; }
+  a.prop-link:hover { text-decoration: underline; }
+
+  /* State messages */
+  .state {
+    padding: 3rem;
+    text-align: center;
+    color: var(--muted);
+    font-size: 0.85rem;
+  }
+
+  .state--error { color: var(--danger); }
+
+  .spinner {
+    display: inline-block;
+    width: 20px;
+    height: 20px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    margin-right: 0.5rem;
+    vertical-align: middle;
+  }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .fetched-at {
+    font-size: 0.7rem;
+    color: var(--muted);
+    padding: 0.75rem 1.25rem;
+    border-top: 1px solid var(--border);
+  }
+
+  @media (max-width: 640px) {
+    body { padding: 1rem; }
+    .search-bar { flex-direction: column; }
+    .field--postcode input, .field--radius select, .field--price input { width: 100%; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Market Analyser</h1>
+  <span>Rightmove · UK Property</span>
+</header>
+
+<div class="container">
+
+  <div class="search-bar">
+    <div class="field field--postcode">
+      <label for="postcode">Postcode</label>
+      <input id="postcode" type="text" value="DE6 1DQ" placeholder="e.g. DE6 1DQ">
+    </div>
+    <div class="field field--radius">
+      <label for="radius">Radius</label>
+      <select id="radius">
+        <option value="0.25">0.25 mi</option>
+        <option value="0.5">0.5 mi</option>
+        <option value="1" selected>1 mi</option>
+        <option value="2">2 mi</option>
+        <option value="3">3 mi</option>
+        <option value="5">5 mi</option>
+      </select>
+    </div>
+    <div class="field field--price">
+      <label for="maxprice">Max Price £</label>
+      <input id="maxprice" type="number" value="300000" step="10000" min="50000">
+    </div>
+    <button id="searchBtn" onclick="runSearch()">Analyse</button>
+  </div>
+
+  <div id="kpis" class="kpi-grid" style="display:none"></div>
+
+  <div id="tableWrap" class="table-wrap" style="display:none">
+    <div class="table-header">
+      <h2 id="tableTitle">Listings</h2>
+      <div class="filters">
+        <button class="filter-btn active" onclick="setFilter('all', this)">All</button>
+        <button class="filter-btn" onclick="setFilter('active', this)">Active only</button>
+        <button class="filter-btn" onclick="setFilter('stc', this)">STC only</button>
+      </div>
+    </div>
+    <div id="tableBody"></div>
+    <div id="fetchedAt" class="fetched-at"></div>
+  </div>
+
+  <div id="status" class="state">Enter a postcode and click Analyse.</div>
+
+</div>
+
+<script>
+let _data = null;
+let _filter = 'all';
+let _sortCol = 'dom';
+let _sortAsc = true;
+
+async function runSearch() {
+  const postcode = document.getElementById('postcode').value.trim();
+  const radius   = document.getElementById('radius').value;
+  const maxPrice = document.getElementById('maxprice').value;
+
+  if (!postcode) { alert('Please enter a postcode.'); return; }
+
+  const btn = document.getElementById('searchBtn');
+  btn.disabled = true;
+  btn.textContent = 'Fetching…';
+
+  document.getElementById('kpis').style.display = 'none';
+  document.getElementById('tableWrap').style.display = 'none';
+  document.getElementById('status').style.display = 'block';
+  document.getElementById('status').className = 'state';
+  document.getElementById('status').innerHTML =
+    '<span class="spinner"></span> Fetching from Rightmove — this may take a few seconds…';
+
+  try {
+    const url = `/api/market?postcode=${encodeURIComponent(postcode)}&radius=${radius}&max_price=${maxPrice}`;
+    const res = await fetch(url);
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || res.statusText);
+    }
+    _data = await res.json();
+    renderAll();
+  } catch (e) {
+    document.getElementById('status').className = 'state state--error';
+    document.getElementById('status').textContent = '⚠ ' + e.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Analyse';
+  }
+}
+
+function renderAll() {
+  renderKPIs();
+  renderTable();
+  document.getElementById('status').style.display = 'none';
+}
+
+function renderKPIs() {
+  const d = _data;
+  const wrap = document.getElementById('kpis');
+  wrap.style.display = 'grid';
+  wrap.innerHTML = `
+    <div class="kpi">
+      <div class="kpi__label">Total Listings</div>
+      <div class="kpi__value">${d.total_listings}</div>
+      <div class="kpi__sub">within ${d.radius_miles} mi · £${(d.max_price/1000).toFixed(0)}k max</div>
+    </div>
+    <div class="kpi kpi--active">
+      <div class="kpi__label">Active</div>
+      <div class="kpi__value">${d.active_count}</div>
+      <div class="kpi__sub">Median DOM: ${d.active_dom_median ?? '—'} days</div>
+    </div>
+    <div class="kpi kpi--stc">
+      <div class="kpi__label">STC / Agreed</div>
+      <div class="kpi__value">${d.stc_count}</div>
+      <div class="kpi__sub">${d.stc_rate_pct}% of market agreed</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi__label">STC Median DOM</div>
+      <div class="kpi__value">${d.stc_dom_median ?? '—'}</div>
+      <div class="kpi__sub">days to agree avg ${d.stc_dom_mean ?? '—'}d</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi__label">Active Med DOM</div>
+      <div class="kpi__value">${d.active_dom_median ?? '—'}</div>
+      <div class="kpi__sub">days on market avg ${d.active_dom_mean ?? '—'}d</div>
+    </div>
+  `;
+}
+
+function setFilter(f, btn) {
+  _filter = f;
+  document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  renderTable();
+}
+
+function setSort(col) {
+  if (_sortCol === col) _sortAsc = !_sortAsc;
+  else { _sortCol = col; _sortAsc = true; }
+  renderTable();
+}
+
+function renderTable() {
+  if (!_data) return;
+
+  let listings = _data.listings;
+  if (_filter === 'active') listings = listings.filter(p => !p.is_stc);
+  if (_filter === 'stc')    listings = listings.filter(p => p.is_stc);
+
+  // Sort
+  listings = [...listings].sort((a, b) => {
+    let va = a[_sortCol], vb = b[_sortCol];
+    if (va === null || va === undefined) va = _sortAsc ? Infinity : -Infinity;
+    if (vb === null || vb === undefined) vb = _sortAsc ? Infinity : -Infinity;
+    return _sortAsc ? (va > vb ? 1 : -1) : (va < vb ? 1 : -1);
+  });
+
+  const maxDom = Math.max(...listings.map(p => p.dom || 0), 1);
+
+  document.getElementById('tableTitle').textContent =
+    `${listings.length} listing${listings.length !== 1 ? 's' : ''}`;
+
+  const rows = listings.map(p => {
+    const domPct = Math.min(100, ((p.dom || 0) / maxDom) * 100);
+    const fillClass = p.is_stc ? 'dom-bar__fill--stc' : (p.dom > 120 ? 'dom-bar__fill--long' : '');
+    const badge = p.is_stc
+      ? '<span class="badge badge--stc">STC</span>'
+      : '<span class="badge badge--active">Active</span>';
+    return `
+      <tr>
+        <td><a class="prop-link" href="${p.url}" target="_blank">${p.address}</a></td>
+        <td>£${(p.price||0).toLocaleString('en-GB')}</td>
+        <td>${p.bedrooms ?? '—'}</td>
+        <td>${p.type || '—'}</td>
+        <td>
+          <div class="dom-bar">
+            <span>${p.dom ?? '—'}</span>
+            <div class="dom-bar__track">
+              <div class="dom-bar__fill ${fillClass}" style="width:${domPct}%"></div>
+            </div>
+          </div>
+        </td>
+        <td>${badge}</td>
+      </tr>`;
+  }).join('');
+
+  document.getElementById('tableBody').innerHTML = `
+    <table>
+      <thead>
+        <tr>
+          <th onclick="setSort('address')">Address</th>
+          <th onclick="setSort('price')">Price</th>
+          <th onclick="setSort('bedrooms')">Bed</th>
+          <th onclick="setSort('type')">Type</th>
+          <th onclick="setSort('dom')">DOM ↕</th>
+          <th onclick="setSort('is_stc')">Status</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+
+  document.getElementById('tableWrap').style.display = 'block';
+  document.getElementById('fetchedAt').textContent =
+    `Data fetched: ${new Date(_data.fetched_at).toLocaleString('en-GB')} · postcode ${_data.postcode}`;
+}
+
+// Enter key trigger
+document.addEventListener('keydown', e => {
+  if (e.key === 'Enter') runSearch();
+});
+</script>
+
+</body>
+</html>
