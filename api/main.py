@@ -119,7 +119,7 @@ class MarketSummary(BaseModel):
 
 @app.get("/api/market", response_model=MarketSummary)
 def market(
-    postcode: str = Query(..., description="UK postcode, e.g. DE6 1DQ"),
+    postcode: str = Query(..., description="UK postcode, e.g. SW1A 2AA"),
     radius: float = Query(1.0, description="Search radius in miles"),
     max_price: int = Query(300000, description="Maximum price"),
 ):
@@ -262,7 +262,7 @@ def _extract_sold(parsed: list) -> list[dict]:
 
 @app.get("/api/sold")
 def sold(
-    postcode: str = Query(..., description="UK postcode e.g. DE6 1DQ"),
+    postcode: str = Query(..., description="UK postcode e.g. SW1A 2AA"),
 ):
     slug = postcode.strip().upper().replace(" ", "-").lower()
     url = f"https://www.rightmove.co.uk/house-prices/{slug}.html"
@@ -310,7 +310,7 @@ SPARQL_ENDPOINT = "https://landregistry.data.gov.uk/landregistry/query"
 @app.get("/api/land-registry")
 def land_registry(
     town: str = Query(..., description="Town name, e.g. ASHBOURNE"),
-    postcode_prefix: str = Query("DE6", description="Postcode prefix filter"),
+    postcode_prefix: str = Query(..., description="Postcode prefix filter, e.g. DE6"),
     months: int = Query(12, description="Months of history"),
 ):
     from datetime import timedelta

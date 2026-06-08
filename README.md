@@ -43,7 +43,7 @@ Then open your browser at:
 http://localhost:8000
 ```
 
-Enter a postcode (e.g. `DE6 1DQ`), set radius and max price, click **Analyse**.
+Enter a postcode (e.g. `SW1A 2AA`), set radius and max price, click **Analyse**.
 
 ## Notes
 
