@@ -349,6 +349,339 @@ async def uk_crime(
 
 
 # ---------------------------------------------------------------------------
+# Rightmove sold prices (turbo-stream)
+# ---------------------------------------------------------------------------
+
+def _parse_turbo_stream(raw_text: str) -> list:
+    match = re.search(r'streamController\.enqueue\("(.+?)"\)', raw_text, re.DOTALL)
+    if not match:
+        return []
+    raw = match.group(1).encode().decode("unicode_escape")
+    return json.loads(raw)
+
+
+def _extract_sold(parsed: list) -> list[dict]:
+    props_list = None
+    for i, item in enumerate(parsed):
+        if item == "properties" and i + 1 < len(parsed) and isinstance(parsed[i + 1], list):
+            props_list = parsed[i + 1]
+            break
+    if not props_list:
+        return []
+
+    def resolve_dict(d: dict) -> dict:
+        result = {}
+        for k, v in d.items():
+            if not k.startswith("_") or not k[1:].isdigit():
+                continue
+            idx = int(k[1:])
+            key_name = parsed[idx] if idx < len(parsed) else k
+            if isinstance(v, int) and 0 <= v < len(parsed):
+                result[key_name] = parsed[v]
+            else:
+                result[key_name] = v
+        return result
+
+    results = []
+    for pi in props_list:
+        if not isinstance(pi, int) or pi >= len(parsed):
+            continue
+        d = parsed[pi]
+        if not isinstance(d, dict):
+            continue
+
+        prop = resolve_dict(d)
+        address = prop.get("address", "")
+        prop_type = prop.get("propertyType", "")
+        bedrooms = prop.get("bedrooms")
+
+        lt_raw = prop.get("latestTransaction")
+        if not isinstance(lt_raw, dict):
+            continue
+        lt = resolve_dict(lt_raw)
+
+        price = str(lt.get("displayPrice", "")).replace("\u00a3", "£").replace("Â£", "£")
+        date_sold = str(lt.get("dateSold", ""))
+
+        if not date_sold or not address:
+            continue
+
+        results.append({
+            "address": str(address),
+            "date_sold": date_sold,
+            "price": price,
+            "type": str(prop_type),
+            "bedrooms": bedrooms if isinstance(bedrooms, int) else None,
+        })
+    return results
+
+
+@mcp.tool(
+    name="uk_sold_prices",
+    annotations={"readOnlyHint": True, "openWorldHint": True},
+)
+async def uk_sold_prices(
+    postcode: str = Field(..., description="UK postcode, e.g. SW1A 2AA"),
+) -> str:
+    """Rightmove sold prices for a postcode — completed sale transactions with address, price, date, and property type.
+
+    Returns up to ~25 most recent sold properties from Rightmove's house-prices pages,
+    plus a monthly count summary. Complements uk_land_registry (which is official but
+    has a 1-3 month registration lag).
+    """
+    slug = postcode.strip().upper().replace(" ", "-").lower()
+    url = f"https://www.rightmove.co.uk/house-prices/{slug}.html"
+
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.get(url, headers=DEFAULT_HEADERS, timeout=15)
+            r.raise_for_status()
+    except Exception as e:
+        return json.dumps({"error": f"Rightmove fetch failed: {e}"})
+
+    parsed = _parse_turbo_stream(r.text)
+    if not parsed:
+        return json.dumps({"error": f"No sold data found for {postcode}"})
+
+    sales = _extract_sold(parsed)
+
+    monthly: dict[str, int] = {}
+    for s in sales:
+        try:
+            dt = datetime.strptime(s["date_sold"], "%d %b %Y")
+            key = dt.strftime("%Y-%m")
+            monthly[key] = monthly.get(key, 0) + 1
+        except ValueError:
+            pass
+
+    return json.dumps({
+        "postcode": postcode.upper(),
+        "total_sold": len(sales),
+        "monthly": dict(sorted(monthly.items())),
+        "sales": sales,
+    }, indent=2, ensure_ascii=False)
+
+
+# ---------------------------------------------------------------------------
+# Listed Buildings — Historic England NHLE (free, no key)
+# ---------------------------------------------------------------------------
+
+NHLE_BASE = (
+    "https://services-eu1.arcgis.com/ZOdPfBS3aqqDYPUQ/arcgis/rest/services/"
+    "National_Heritage_List_for_England_NHLE_v02_VIEW/FeatureServer"
+)
+
+
+@mcp.tool(
+    name="uk_listed_buildings",
+    annotations={"readOnlyHint": True, "openWorldHint": True},
+)
+async def uk_listed_buildings(
+    lat: float = Field(..., description="Latitude"),
+    lng: float = Field(..., description="Longitude"),
+    radius_m: int = Field(500, description="Search radius in metres"),
+) -> str:
+    """Listed buildings near a point from Historic England's National Heritage List (NHLE).
+
+    Returns building name, listing grade (I, II*, II), list entry number, and link.
+    Useful for checking if a property or its neighbours are listed (affects renovations,
+    insurance, and conveyancing).
+    """
+    params = {
+        "geometry": f"{lng},{lat}",
+        "geometryType": "esriGeometryPoint",
+        "inSR": "4326",
+        "spatialRel": "esriSpatialRelIntersects",
+        "distance": str(radius_m),
+        "units": "esriSRUnit_Meter",
+        "outFields": "Name,Grade,ListEntry,hyperlink",
+        "returnGeometry": "false",
+        "f": "json",
+        "resultRecordCount": "50",
+    }
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.get(f"{NHLE_BASE}/0/query", params=params, timeout=20)
+            r.raise_for_status()
+    except Exception as e:
+        return json.dumps({"error": f"Historic England query failed: {e}"})
+
+    data = r.json()
+    if "error" in data:
+        return json.dumps({"error": str(data["error"])})
+
+    buildings = []
+    grades: dict[str, int] = {}
+    for f in data.get("features", []):
+        a = f.get("attributes", {})
+        grade = a.get("Grade", "?")
+        grades[grade] = grades.get(grade, 0) + 1
+        buildings.append({
+            "name": a.get("Name", ""),
+            "grade": grade,
+            "list_entry": a.get("ListEntry"),
+            "url": a.get("hyperlink", ""),
+        })
+
+    return json.dumps({
+        "lat": lat, "lng": lng, "radius_m": radius_m,
+        "total": len(buildings),
+        "by_grade": grades,
+        "buildings": buildings,
+    }, indent=2, ensure_ascii=False)
+
+
+# ---------------------------------------------------------------------------
+# Air Quality — DEFRA UK-AIR SOS API (free, no key)
+# ---------------------------------------------------------------------------
+
+DEFRA_SOS = "https://uk-air.defra.gov.uk/sos-ukair/api/v1"
+
+
+@mcp.tool(
+    name="uk_air_quality",
+    annotations={"readOnlyHint": True, "openWorldHint": True},
+)
+async def uk_air_quality(
+    lat: float = Field(..., description="Latitude"),
+    lng: float = Field(..., description="Longitude"),
+    max_sites: int = Field(3, description="Number of nearest monitoring sites to include"),
+) -> str:
+    """Air quality from DEFRA's UK-AIR monitoring network.
+
+    Finds the nearest monitoring sites and returns the latest pollutant measurements
+    (NO2, PM10, PM2.5, ozone etc. in µg/m³). Note: rural areas may be 15-30km from
+    the nearest monitor, so values are indicative of the wider area.
+    """
+    import math
+
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.get(f"{DEFRA_SOS}/stations", timeout=30)
+            r.raise_for_status()
+            stations = r.json()
+
+            def dist_km(slat: float, slng: float) -> float:
+                return math.sqrt(
+                    ((slat - lat) * 111) ** 2
+                    + ((slng - lng) * 111 * math.cos(math.radians(lat))) ** 2
+                )
+
+            # Coordinates are [lat, lng, alt]; group series by site name
+            sites: dict[str, dict] = {}
+            for s in stations:
+                coords = s.get("geometry", {}).get("coordinates", [])
+                if len(coords) < 2:
+                    continue
+                label = s.get("properties", {}).get("label", "")
+                site_name = label.split("-")[0]
+                d = dist_km(coords[0], coords[1])
+                if site_name not in sites or d < sites[site_name]["dist_km"]:
+                    sites[site_name] = {"dist_km": d, "station_ids": []}
+                sites[site_name]["station_ids"].append(s.get("properties", {}).get("id"))
+
+            nearest = sorted(sites.items(), key=lambda x: x[1]["dist_km"])[:max_sites]
+
+            now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            results = []
+            for site_name, info in nearest:
+                site_result = {"site": site_name, "dist_km": round(info["dist_km"], 1), "measurements": []}
+                for sid in info["station_ids"]:
+                    sr = await client.get(f"{DEFRA_SOS}/stations/{sid}", timeout=20)
+                    if sr.status_code != 200:
+                        continue
+                    st = sr.json()
+                    ts_map = st.get("properties", {}).get("timeseries", {})
+                    label = st.get("properties", {}).get("label", "")
+                    pollutant = label.split("-", 1)[1] if "-" in label else label
+                    for tid in ts_map:
+                        dr = await client.get(
+                            f"{DEFRA_SOS}/timeseries/{tid}/getData",
+                            params={"timespan": f"PT48H/{now}"},
+                            timeout=20,
+                        )
+                        if dr.status_code != 200:
+                            continue
+                        vals = dr.json().get("values", [])
+                        if vals:
+                            last = vals[-1]
+                            ts_str = datetime.fromtimestamp(
+                                last["timestamp"] / 1000, tz=timezone.utc
+                            ).strftime("%Y-%m-%d %H:%M")
+                            site_result["measurements"].append({
+                                "pollutant": pollutant.replace(" (air)", "").replace(" (aerosol)", ""),
+                                "value_ugm3": last["value"],
+                                "measured_at": ts_str,
+                            })
+                results.append(site_result)
+    except Exception as e:
+        return json.dumps({"error": f"DEFRA air quality failed: {e}"})
+
+    return json.dumps({"lat": lat, "lng": lng, "sites": results}, indent=2, ensure_ascii=False)
+
+
+# ---------------------------------------------------------------------------
+# Schools — OpenStreetMap Overpass API (free, no key)
+# ---------------------------------------------------------------------------
+
+OVERPASS_URL = "https://overpass-api.de/api/interpreter"
+
+
+@mcp.tool(
+    name="uk_schools",
+    annotations={"readOnlyHint": True, "openWorldHint": True},
+)
+async def uk_schools(
+    lat: float = Field(..., description="Latitude"),
+    lng: float = Field(..., description="Longitude"),
+    radius_m: int = Field(3000, description="Search radius in metres"),
+) -> str:
+    """Schools near a point from OpenStreetMap.
+
+    Returns school names and types (primary/secondary) within the radius.
+    Does not include Ofsted ratings — check reports.ofsted.gov.uk for those.
+    """
+    query = (
+        f'[out:json][timeout:20];'
+        f'(node["amenity"="school"](around:{radius_m},{lat},{lng});'
+        f'way["amenity"="school"](around:{radius_m},{lat},{lng}););'
+        f'out center tags;'
+    )
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.post(
+                OVERPASS_URL,
+                content=query.encode(),
+                headers={"Content-Type": "text/plain", "User-Agent": "uk-property-mcp/1.0"},
+                timeout=30,
+            )
+            r.raise_for_status()
+    except Exception as e:
+        return json.dumps({"error": f"Overpass query failed: {e}"})
+
+    schools = []
+    seen = set()
+    for e in r.json().get("elements", []):
+        tags = e.get("tags", {})
+        name = tags.get("name", "")
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        schools.append({
+            "name": name,
+            "type": tags.get("school", ""),
+            "religion": tags.get("religion", ""),
+        })
+
+    return json.dumps({
+        "lat": lat, "lng": lng, "radius_m": radius_m,
+        "total": len(schools),
+        "schools": schools,
+        "note": "Ofsted ratings not included — see reports.ofsted.gov.uk",
+    }, indent=2, ensure_ascii=False)
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 

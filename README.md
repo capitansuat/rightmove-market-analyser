@@ -44,10 +44,14 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 | Tool | Source | Data |
 |---|---|---|
 | `uk_market_search` | Rightmove | Active + STC listings, DOM, price |
+| `uk_sold_prices` | Rightmove | Recent completed sales (house-prices) |
 | `uk_land_registry` | HM Land Registry | PPD sales, monthly volume by type |
 | `uk_hpi` | HM Land Registry | Price index, annual change, sales volume |
 | `uk_flood_risk` | Environment Agency | Monitoring stations, warnings, flood areas |
 | `uk_crime` | Police UK | Crime counts by category near a point |
+| `uk_listed_buildings` | Historic England | Listed buildings, grades (NHLE) |
+| `uk_air_quality` | DEFRA UK-AIR | Latest NO2/PM10/PM2.5/ozone readings |
+| `uk_schools` | OpenStreetMap | Schools and types near a point |
 
 ## REST API (alternative)
 
@@ -78,6 +82,9 @@ All data comes from free, public sources:
 | [HM Land Registry](https://landregistry.data.gov.uk) | Price Paid Data, House Price Index | None |
 | [Environment Agency](https://environment.data.gov.uk) | Flood monitoring, warnings | None |
 | [Police UK](https://data.police.uk) | Street-level crime | None |
+| [Historic England](https://opendata-historicengland.hub.arcgis.com) | Listed buildings (NHLE) | None |
+| [DEFRA UK-AIR](https://uk-air.defra.gov.uk) | Air quality monitoring | None |
+| [OpenStreetMap](https://overpass-api.de) | Schools | None |
 | [EPC Register](https://epc.opendatacommunities.org) | Energy certificates | Free key |
 
 ## Notes
