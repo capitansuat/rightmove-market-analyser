@@ -677,7 +677,88 @@ async def uk_schools(
         "lat": lat, "lng": lng, "radius_m": radius_m,
         "total": len(schools),
         "schools": schools,
-        "note": "Ofsted ratings not included — see reports.ofsted.gov.uk",
+        "note": "For Ofsted ratings use the uk_ofsted tool",
+    }, indent=2, ensure_ascii=False)
+
+
+# ---------------------------------------------------------------------------
+# Ofsted ratings — reports.ofsted.gov.uk (free, server-rendered HTML)
+# ---------------------------------------------------------------------------
+
+OFSTED_BASE = "https://reports.ofsted.gov.uk"
+
+
+@mcp.tool(
+    name="uk_ofsted",
+    annotations={"readOnlyHint": True, "openWorldHint": True},
+)
+async def uk_ofsted(
+    postcode: str = Field(..., description="UK postcode, e.g. SW1A 2AA"),
+    radius_miles: int = Field(5, description="Search radius in miles (1-25)"),
+    max_schools: int = Field(8, description="Max schools to fetch ratings for (each needs a page fetch)"),
+) -> str:
+    """Ofsted inspection ratings for schools near a postcode, from the official Ofsted reports site.
+
+    Returns school name, category, latest inspection rating (Outstanding / Good /
+    Requires improvement / Inadequate), inspection date, and report link.
+    Note: schools inspected after Sept 2024 may not have a single overall rating
+    (Ofsted replaced it with report cards); for those the latest available
+    judgement is returned.
+    """
+    search_url = (
+        f"{OFSTED_BASE}/search?q=&location={postcode.replace(' ', '+')}"
+        f"&radius={radius_miles}&level_1_types=1&level_2_types%5B%5D=1"
+    )
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.get(search_url, headers=DEFAULT_HEADERS, timeout=20)
+            r.raise_for_status()
+
+            blocks = re.findall(r'<li[^>]*search-result[^>]*>(.*?)</li>', r.text, re.DOTALL)
+            schools = []
+            for block in blocks[:max_schools]:
+                name_m = re.search(r'<a[^>]*>([^<]+)</a>', block)
+                link_m = re.search(r'href="([^"]+)"', block)
+                cat_m = re.search(r'Category:.*?<[^>]*>([^<]+)<', block, re.DOTALL)
+                if not name_m or not link_m:
+                    continue
+
+                school = {
+                    "name": name_m.group(1).replace("&#039;", "'").strip(),
+                    "category": cat_m.group(1).strip() if cat_m else "",
+                    "rating": None,
+                    "inspection_date": None,
+                    "report_url": f"{OFSTED_BASE}{link_m.group(1)}",
+                }
+
+                # Fetch provider page for latest inspection rating
+                try:
+                    pr = await client.get(school["report_url"], headers=DEFAULT_HEADERS, timeout=15)
+                    if pr.status_code == 200:
+                        text = re.sub(r"<[^>]+>", " ", pr.text)
+                        text = re.sub(r"\s+", " ", text)
+                        m = re.search(
+                            r"Full inspection: (Outstanding|Good|Requires improvement|Inadequate)"
+                            r".{0,80}?Published (\d{1,2} \w+ \d{4})",
+                            text,
+                        )
+                        if m:
+                            school["rating"] = m.group(1)
+                            school["inspection_date"] = m.group(2)
+                except Exception:
+                    pass
+
+                schools.append(school)
+                time.sleep(0.3)  # polite delay
+    except Exception as e:
+        return json.dumps({"error": f"Ofsted search failed: {e}"})
+
+    return json.dumps({
+        "postcode": postcode.upper(),
+        "radius_miles": radius_miles,
+        "total": len(schools),
+        "schools": schools,
+        "source": "reports.ofsted.gov.uk",
     }, indent=2, ensure_ascii=False)
 
 

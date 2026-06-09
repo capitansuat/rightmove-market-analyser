@@ -52,6 +52,7 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 | `uk_listed_buildings` | Historic England | Listed buildings, grades (NHLE) |
 | `uk_air_quality` | DEFRA UK-AIR | Latest NO2/PM10/PM2.5/ozone readings |
 | `uk_schools` | OpenStreetMap | Schools and types near a point |
+| `uk_ofsted` | Ofsted | School inspection ratings and dates |
 
 ## REST API (alternative)
 
@@ -85,6 +86,7 @@ All data comes from free, public sources:
 | [Historic England](https://opendata-historicengland.hub.arcgis.com) | Listed buildings (NHLE) | None |
 | [DEFRA UK-AIR](https://uk-air.defra.gov.uk) | Air quality monitoring | None |
 | [OpenStreetMap](https://overpass-api.de) | Schools | None |
+| [Ofsted](https://reports.ofsted.gov.uk) | School inspection ratings | None |
 | [EPC Register](https://epc.opendatacommunities.org) | Energy certificates | Free key |
 
 ## Notes
