@@ -44,15 +44,15 @@ PAGE_DELAY = 0.4
 
 def _lookup_postcode(postcode: str) -> str:
     """Resolve a postcode to a Rightmove locationIdentifier."""
-    url = f"https://los.rightmove.co.uk/typeahead?query={postcode.replace(' ', '+')}"
-    r = httpx.get(url, headers=DEFAULT_HEADERS, timeout=10)
+    url = "https://los.rightmove.co.uk/typeahead"
+    params = {"query": postcode.upper().strip(), "limit": 10, "exclude": "STREET"}
+    r = httpx.get(url, params=params, headers=DEFAULT_HEADERS, timeout=10)
     r.raise_for_status()
-    data = r.json()
-    suggestions = data.get("typeAheadSuggestions", [])
-    if not suggestions:
+    matches = r.json().get("matches", [])
+    if not matches:
         raise ValueError(f"No Rightmove location found for '{postcode}'")
-    norm = suggestions[0].get("normalisedSearchTerm", "")
-    return norm
+    m = matches[0]
+    return f"{m.get('type', 'OUTCODE')}^{m['id']}"
 
 
 def _scrape_market(postcode: str, radius: float, max_price: int) -> dict:
@@ -85,11 +85,12 @@ def _scrape_market(postcode: str, radius: float, max_price: int) -> dict:
         if not m:
             break
         page_data = json.loads(m.group(1))
-        props = (
+        search_results = (
             page_data.get("props", {})
             .get("pageProps", {})
-            .get("properties", [])
+            .get("searchResults", {})
         )
+        props = search_results.get("properties", [])
         if not props:
             break
 
@@ -118,10 +119,10 @@ def _scrape_market(postcode: str, radius: float, max_price: int) -> dict:
                 "url": f"https://www.rightmove.co.uk/properties/{p.get('id')}#/?channel=RES_BUY",
             })
 
-        pagination = page_data.get("props", {}).get("pageProps", {}).get("pagination", {})
-        if pagination.get("last", 0) <= index // 24:
-            break
+        total = int(search_results.get("resultCount", "0").replace(",", "") or 0)
         index += 24
+        if index >= total or index >= 1000:
+            break
         time.sleep(PAGE_DELAY)
 
     # Dedup
