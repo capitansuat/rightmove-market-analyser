@@ -3,7 +3,8 @@
 Captures daily listing states into SQLite, then derives status transitions
 (Active -> STC, STC -> Active, price changes, new/removed listings) by
 comparing snapshots. Gives true time-to-STC metrics that Rightmove
-doesn't expose.
+doesn't expose. Listings that disappear while STC have likely completed;
+cross-check with Land Registry PPD 1-3 months later for confirmation.
 
 Usage:
     python3 tracker.py snapshot --postcode "SW1A 2AA" --radius 1 --max-price 500000
@@ -14,7 +15,7 @@ from __future__ import annotations
 
 import argparse
 import sqlite3
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from pathlib import Path
 
 from server import _scrape_market
@@ -43,10 +44,12 @@ def get_db(db_path: Path) -> sqlite3.Connection:
     return conn
 
 
-def cmd_snapshot(args: argparse.Namespace) -> None:
+def take_snapshot(postcode: str, radius: float = 1.0, max_price: int = 500000,
+                  db_path: Path = DB_DEFAULT) -> dict:
+    """Capture today's listing states into the DB. Returns summary."""
     today = date.today().isoformat()
-    data = _scrape_market(args.postcode, args.radius, args.max_price)
-    conn = get_db(Path(args.db))
+    data = _scrape_market(postcode, radius, max_price)
+    conn = get_db(db_path)
     rows = [
         (today, l["id"], l["price"], int(l["is_stc"]), l["dom"],
          l["address"], l["type"], l["bedrooms"])
@@ -56,25 +59,28 @@ def cmd_snapshot(args: argparse.Namespace) -> None:
         "INSERT OR REPLACE INTO observations VALUES (?,?,?,?,?,?,?,?)", rows
     )
     conn.commit()
-    print(f"{today}: {len(rows)} listings saved "
-          f"(active {data['active_count']}, stc {data['stc_count']})")
+    return {
+        "snapshot_date": today,
+        "listings_saved": len(rows),
+        "active": data["active_count"],
+        "stc": data["stc_count"],
+    }
 
 
-def cmd_report(args: argparse.Namespace) -> None:
-    conn = get_db(Path(args.db))
-    cutoff = (date.today() - timedelta(days=args.days)).isoformat()
+def compute_transitions(db_path: Path = DB_DEFAULT, days: int = 30) -> dict:
+    """Compare consecutive snapshots and return all status transitions."""
+    conn = get_db(db_path)
+    cutoff = (date.today() - timedelta(days=days)).isoformat()
 
     dates = [r[0] for r in conn.execute(
         "SELECT DISTINCT snapshot_date FROM observations WHERE snapshot_date >= ? ORDER BY 1",
         (cutoff,),
     )]
+    result: dict = {"snapshots": dates, "went_stc": [], "fell_through": [],
+                    "price_changes": [], "new_listings": [], "removed": []}
     if len(dates) < 2:
-        print(f"Snapshots in range: {len(dates)} — need at least 2 for transitions.")
-        return
-
-    print(f"Snapshots: {len(dates)} ({dates[0]} .. {dates[-1]})\n")
-
-    went_stc, fell_through, price_changes, appeared, disappeared = [], [], [], [], []
+        result["note"] = f"Only {len(dates)} snapshot(s) in range; need 2+ for transitions."
+        return result
 
     for prev_d, curr_d in zip(dates, dates[1:]):
         prev = {r[0]: r for r in conn.execute(
@@ -86,41 +92,73 @@ def cmd_report(args: argparse.Namespace) -> None:
 
         for pid, (_, price, stc, dom, addr) in curr.items():
             if pid not in prev:
-                appeared.append((curr_d, addr, price))
+                result["new_listings"].append(
+                    {"date": curr_d, "address": addr, "price": price})
                 continue
             _, p_price, p_stc, _, _ = prev[pid]
             if not p_stc and stc:
-                went_stc.append((curr_d, addr, price, dom))
+                result["went_stc"].append(
+                    {"date": curr_d, "address": addr, "price": price, "dom": dom})
             elif p_stc and not stc:
-                fell_through.append((curr_d, addr, price))
+                result["fell_through"].append(
+                    {"date": curr_d, "address": addr, "price": price})
             if p_price and price and p_price != price:
-                price_changes.append((curr_d, addr, p_price, price))
+                result["price_changes"].append(
+                    {"date": curr_d, "address": addr,
+                     "from": p_price, "to": price,
+                     "pct": round((price - p_price) * 100 / p_price, 1)})
 
         for pid, (_, price, stc, _, addr) in prev.items():
             if pid not in curr:
-                disappeared.append((curr_d, addr, price, "was STC" if stc else "was active"))
+                result["removed"].append(
+                    {"date": curr_d, "address": addr, "price": price,
+                     "status": "likely completed (was STC)" if stc
+                               else "likely withdrawn (was active)"})
+
+    doms = sorted(t["dom"] for t in result["went_stc"])
+    if doms:
+        result["time_to_stc"] = {
+            "median_days": doms[len(doms) // 2],
+            "min": doms[0], "max": doms[-1], "n": len(doms),
+        }
+    return result
+
+
+def cmd_snapshot(args: argparse.Namespace) -> None:
+    s = take_snapshot(args.postcode, args.radius, args.max_price, Path(args.db))
+    print(f"{s['snapshot_date']}: {s['listings_saved']} listings saved "
+          f"(active {s['active']}, stc {s['stc']})")
+
+
+def cmd_report(args: argparse.Namespace) -> None:
+    r = compute_transitions(Path(args.db), args.days)
+    if "note" in r:
+        print(r["note"])
+        return
+
+    print(f"Snapshots: {len(r['snapshots'])} ({r['snapshots'][0]} .. {r['snapshots'][-1]})\n")
 
     def section(title: str, rows: list, fmt) -> None:
         print(f"--- {title} ({len(rows)}) ---")
-        for r in rows:
-            print(f"  {fmt(r)}")
+        for row in rows:
+            print(f"  {fmt(row)}")
         print()
 
-    section("Went STC", went_stc,
-            lambda r: f"{r[0]}  {r[1][:50]}  £{r[2]:,}  (DOM {r[3]} days)")
-    section("Fell through (STC -> Active)", fell_through,
-            lambda r: f"{r[0]}  {r[1][:50]}  £{r[2]:,}")
-    section("Price changes", price_changes,
-            lambda r: f"{r[0]}  {r[1][:45]}  £{r[2]:,} -> £{r[3]:,} ({(r[3]-r[2])*100//r[2]:+d}%)")
-    section("New listings", appeared,
-            lambda r: f"{r[0]}  {r[1][:50]}  £{r[2]:,}")
-    section("Removed (sold or withdrawn)", disappeared,
-            lambda r: f"{r[0]}  {r[1][:50]}  £{r[2]:,}  {r[3]}")
+    section("Went STC", r["went_stc"],
+            lambda t: f"{t['date']}  {t['address'][:50]}  £{t['price']:,}  (DOM {t['dom']} days)")
+    section("Fell through (STC -> Active)", r["fell_through"],
+            lambda t: f"{t['date']}  {t['address'][:50]}  £{t['price']:,}")
+    section("Price changes", r["price_changes"],
+            lambda t: f"{t['date']}  {t['address'][:45]}  £{t['from']:,} -> £{t['to']:,} ({t['pct']:+.1f}%)")
+    section("New listings", r["new_listings"],
+            lambda t: f"{t['date']}  {t['address'][:50]}  £{t['price']:,}")
+    section("Removed", r["removed"],
+            lambda t: f"{t['date']}  {t['address'][:50]}  £{t['price']:,}  {t['status']}")
 
-    if went_stc:
-        doms = sorted(r[3] for r in went_stc)
-        print(f"Observed time-to-STC: median {doms[len(doms)//2]} days "
-              f"(n={len(doms)}, min {doms[0]}, max {doms[-1]})")
+    if "time_to_stc" in r:
+        s = r["time_to_stc"]
+        print(f"Observed time-to-STC: median {s['median_days']} days "
+              f"(n={s['n']}, min {s['min']}, max {s['max']})")
 
 
 def main() -> None:

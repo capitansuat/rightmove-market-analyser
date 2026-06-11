@@ -764,6 +764,54 @@ async def uk_ofsted(
 
 
 # ---------------------------------------------------------------------------
+# Daily tracker — snapshot + transition report (local SQLite)
+# ---------------------------------------------------------------------------
+
+@mcp.tool(
+    name="uk_tracker_snapshot",
+    annotations={"readOnlyHint": False, "openWorldHint": True},
+)
+async def uk_tracker_snapshot(
+    postcode: str = Field(..., description="UK postcode to track, e.g. SW1A 2AA"),
+    radius: float = Field(1.0, description="Search radius in miles"),
+    max_price: int = Field(500000, description="Maximum price"),
+) -> str:
+    """Capture today's Rightmove listing states into the local tracker database.
+
+    Run daily (manually or via cron) to build a history. Transitions between
+    snapshots reveal true time-to-STC, fall-throughs, and price changes.
+    """
+    from tracker import take_snapshot
+    try:
+        result = take_snapshot(postcode, radius, max_price)
+    except Exception as e:
+        return json.dumps({"error": f"Snapshot failed: {e}"})
+    return json.dumps(result, indent=2)
+
+
+@mcp.tool(
+    name="uk_tracker_report",
+    annotations={"readOnlyHint": True, "openWorldHint": False},
+)
+async def uk_tracker_report(
+    days: int = Field(30, description="How many days of snapshots to compare"),
+) -> str:
+    """Status transitions from the local tracker database.
+
+    Compares consecutive daily snapshots and reports: Active -> STC transitions
+    (with true time-to-STC), STC -> Active fall-throughs, price changes,
+    new listings, and removals. A listing removed while STC has likely
+    completed; removed while active was likely withdrawn.
+    """
+    from tracker import compute_transitions
+    try:
+        result = compute_transitions(days=days)
+    except Exception as e:
+        return json.dumps({"error": f"Report failed: {e}"})
+    return json.dumps(result, indent=2, ensure_ascii=False)
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
