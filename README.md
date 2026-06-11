@@ -53,6 +53,8 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 | `uk_air_quality` | DEFRA UK-AIR | Latest NO2/PM10/PM2.5/ozone readings |
 | `uk_schools` | OpenStreetMap | Schools and types near a point |
 | `uk_ofsted` | Ofsted | School inspection ratings and dates |
+| `uk_tracker_snapshot` | Rightmove | Capture today's listing states (run daily) |
+| `uk_tracker_report` | Local SQLite | Transitions: time-to-STC, fall-throughs, price cuts |
 
 ## REST API (alternative)
 
